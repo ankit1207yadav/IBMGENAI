@@ -436,6 +436,83 @@ INDEX_HTML = """
 def home():
     return render_template_string(INDEX_HTML)
 
+import random
+
+QUOTE_DATABASE = {
+    "happy": [
+        "Happiness is not something ready-made. It comes from your own actions.",
+        "Enjoy the little things, for one day you may look back and realize they were the big things.",
+        "The most wasted of all days is one without laughter.",
+        "Be happy for this moment. This moment is your life.",
+        "Happiness is a warm glow that starts from within and spreads to others."
+    ],
+    "sad": [
+        "It's okay to have bad days. The clouds will clear, and the sun will shine again.",
+        "Difficult roads often lead to beautiful destinations.",
+        "You are stronger than you think, and this too shall pass.",
+        "Every storm runs out of rain. Stay strong, brighter days are coming.",
+        "The stars need darkness to shine. Keep holding on."
+    ],
+    "tired": [
+        "Rest if you must, but don't quit. You are doing great.",
+        "It is okay to pause and recharge. Your dreams will wait for you.",
+        "Even the strongest need rest to shine bright again. Take it easy.",
+        "Tired minds need rest, not quit. Recharge and start fresh tomorrow.",
+        "Give yourself permission to rest. You've been working hard."
+    ],
+    "anxious": [
+        "Breathe. You have survived 100% of your hardest days so far. You've got this.",
+        "Do not let the shadows of tomorrow darken the light of today.",
+        "Take it one breath, one step, one moment at a time. You are safe.",
+        "Trust the process. You are stronger than your worries.",
+        "Quiet the mind, quiet the soul. You are doing the best you can."
+    ],
+    "angry": [
+        "Control your anger; it is only one letter short of danger. Stay calm and rise above.",
+        "Do not let the storm in your mind steal the peace in your heart.",
+        "Your peace of mind is worth more than winning an argument.",
+        "In the middle of a storm, peace is your superpower. Breathe out the anger.",
+        "Speak when you are angry and you will make the best speech you will ever regret."
+    ],
+    "excited": [
+        "Let your passion fly! This excitement is the fuel for your next big achievement.",
+        "Capture this beautiful energy and run towards your dreams!",
+        "Your enthusiasm is contagious—let it light up the world!",
+        "Believe in your energy. You are on the verge of something incredible.",
+        "Keep that wonderful energy going and inspire everyone around you."
+    ],
+    "general": [
+        "Keep moving forward. Great things take time and patience.",
+        "Believe you can and you're halfway there.",
+        "Success is not final, failure is not fatal: it is the courage to continue that counts.",
+        "Act as if what you do makes a difference. It does.",
+        "The only way to do great work is to love what you do."
+    ]
+}
+
+def get_mood_category(mood_str):
+    mood_str = mood_str.lower().strip()
+    if mood_str in QUOTE_DATABASE:
+        return mood_str
+        
+    mappings = {
+        "happy": ["joy", "glad", "cheerful", "delighted", "good", "great", "awesome", "blessed", "content"],
+        "sad": ["down", "blue", "depressed", "heartbroken", "lonely", "grief", "hopeless", "hurt", "crying"],
+        "tired": ["exhausted", "sleepy", "drained", "weak", "fatigued", "lazy", "burnt", "burnout"],
+        "anxious": ["nervous", "stressed", "worried", "scared", "fear", "panic", "overwhelmed", "tense"],
+        "angry": ["mad", "furious", "annoyed", "frustrated", "irritated", "hate", "rage"],
+        "excited": ["thrilled", "eager", "hyped", "energetic", "passion", "pumped"]
+    }
+    
+    for category, keywords in mappings.items():
+        if mood_str in keywords:
+            return category
+        for kw in keywords:
+            if kw in mood_str:
+                return category
+                
+    return "general"
+
 @app.route("/generate", methods=["POST"])
 def generate():
     if not generator:
@@ -449,18 +526,27 @@ def generate():
 
     emoji = EMOJI_MAP.get(mood, "🧘")
     
-    # Run the generation pipeline
-    prompt = f"Give me a short motivational quote for someone who is feeling {mood}."
+    # 1. Retrieve a high-quality base quote matching the mood
+    category = get_mood_category(mood)
+    base_quotes = QUOTE_DATABASE[category]
+    base_quote = random.choice(base_quotes)
+    
+    # 2. Use google/flan-t5-small to dynamically paraphrase and customize the quote
+    prompt = f"Paraphrase this motivational quote: {base_quote}"
     try:
-        response = generator(prompt, max_length=50, do_sample=True, temperature=0.8)
+        response = generator(prompt, max_new_tokens=60, do_sample=True, temperature=0.7, repetition_penalty=1.2)
         generated_text = response[0]['generated_text']
         
-        # Clean up any leading symbols or whitespaces from the generated output
+        # Clean up any leading symbols or quotes
         generated_text = generated_text.strip().lstrip("✨").lstrip("“").lstrip('"').rstrip("”").rstrip('"').strip()
         
-        # Fallback if generation is empty
-        if not generated_text:
-            generated_text = "Keep moving forward! Great things take time."
+        # Make sure the generated sentence starts with a capital letter
+        if generated_text:
+            generated_text = generated_text[0].upper() + generated_text[1:]
+            
+        # Fallback to the beautiful base quote if generation is empty or too short
+        if not generated_text or len(generated_text) < 15:
+            generated_text = base_quote
             
         return jsonify({
             "mood": mood,
@@ -468,7 +554,13 @@ def generate():
             "quote": generated_text
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Graceful fallback to the high-quality base quote on model failure
+        return jsonify({
+            "mood": mood,
+            "emoji": emoji,
+            "quote": base_quote,
+            "warning": f"Model fallback activated: {str(e)}"
+        })
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
